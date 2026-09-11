@@ -191,6 +191,10 @@
       0%, 100% { box-shadow: 0 0 6px 2px rgba(34,211,238,0.5), 0 0 16px 4px rgba(34,211,238,0.2); }
       50% { box-shadow: 0 0 10px 4px rgba(34,211,238,0.7), 0 0 28px 8px rgba(34,211,238,0.3); }
     }
+    @keyframes markerPulseAmber {
+      0%, 100% { box-shadow: 0 0 6px 2px rgba(245,158,11,0.5), 0 0 16px 4px rgba(245,158,11,0.2); }
+      50% { box-shadow: 0 0 10px 4px rgba(245,158,11,0.7), 0 0 28px 8px rgba(245,158,11,0.3); }
+    }
     @keyframes markerPulseGreen {
       0%, 100% { box-shadow: 0 0 6px 2px rgba(34,197,94,0.5), 0 0 16px 4px rgba(34,197,94,0.2); }
       50% { box-shadow: 0 0 10px 4px rgba(34,197,94,0.8), 0 0 32px 10px rgba(34,197,94,0.35); }
@@ -225,6 +229,21 @@
       border: 3px solid #fff;
       transform: scale(1.3);
     }
+    .marker-moderate {
+      width: 14px; height: 14px;
+      background: #f59e0b;
+      border: 2px solid #fcd34d;
+      border-radius: 50%;
+      animation: markerPulseAmber 2s ease-in-out infinite;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+    }
+    .marker-moderate:hover { transform: scale(1.4); }
+    .marker-moderate.selected {
+      width: 18px; height: 18px;
+      border: 3px solid #fff;
+      transform: scale(1.3);
+    }
     .marker-safe-zone {
       width: 20px; height: 20px;
       background: #22c55e;
@@ -253,6 +272,7 @@
     }
     .marker-ring.red { border-color: #ef4444; }
     .marker-ring.cyan { border-color: #22d3ee; }
+    .marker-ring.amber { border-color: #f59e0b; }
     .marker-ring.green { border-color: #22c55e; }
 
     /* ── Terminal log typewriter ── */
@@ -293,24 +313,137 @@
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
     /* ═══════════════════════════════════════
-       MOCK DATA
+       DATASET — Real habitations & safe zones
        ═══════════════════════════════════════ */
     const HABITATIONS = [
-      { id: 1, name: 'Sector 4 — Slope A',    risk: 'CRITICAL', score: 89.7, pop: 2340, threatVector: 'LANDSLIDE', lat: 30.3465, lng: 78.0620 },
-      { id: 2, name: 'Village Alpha',          risk: 'HIGH',     score: 76.2, pop: 1120, threatVector: 'FLOOD',     lat: 30.2850, lng: 77.9930 },
-      { id: 3, name: 'Valley Settlement 09',   risk: 'CRITICAL', score: 93.1, pop: 4510, threatVector: 'SEISMIC',   lat: 30.3780, lng: 78.1150 },
-      { id: 4, name: 'East Ridge — Block C',   risk: 'HIGH',     score: 68.4, pop: 890,  threatVector: 'EROSION',   lat: 30.3100, lng: 78.0800 },
+      {
+        id: 'HAB-01',
+        name: 'Joshimath Sector 3',
+        lat: 30.5556,
+        lng: 79.5662,
+        risk_score: 89.7,
+        priority: 'CRITICAL',
+        hazard: 'Landslide / Subsidence',
+        population: 1284,
+        vulnerable: 327,
+        safe_zone_id: 'SZ-01',
+      },
+      {
+        id: 'HAB-02',
+        name: 'Dharchula Lower Slope',
+        lat: 29.8489,
+        lng: 80.5369,
+        risk_score: 78.4,
+        priority: 'HIGH',
+        hazard: 'Flash Flood',
+        population: 840,
+        vulnerable: 190,
+        safe_zone_id: 'SZ-02',
+      },
+      {
+        id: 'HAB-03',
+        name: 'Kedarnath Valley Habitation',
+        lat: 30.7346,
+        lng: 79.0669,
+        risk_score: 92.1,
+        priority: 'CRITICAL',
+        hazard: 'Glacial Lake Outburst',
+        population: 2100,
+        vulnerable: 510,
+        safe_zone_id: 'SZ-01',
+      },
+      {
+        id: 'HAB-04',
+        name: 'Munsiyari East Ridge',
+        lat: 30.0650,
+        lng: 80.2350,
+        risk_score: 45.2,
+        priority: 'MODERATE',
+        hazard: 'Soil Erosion',
+        population: 620,
+        vulnerable: 85,
+        safe_zone_id: 'SZ-02',
+      },
     ];
 
-    const SAFE_ZONE = { name: 'Zone Beta — High Plateau', lat: 30.4120, lng: 78.0450 };
-    const MAP_CENTER = [30.3165, 78.0322];
-    const MAP_ZOOM = 12;
+    const SAFE_ZONES = [
+      {
+        id: 'SZ-01',
+        name: 'Pipalkoti Plateau',
+        lat: 30.4300,
+        lng: 79.3300,
+        capacity: 3500,
+        occupied: 1200,
+        distance_km: 14.2,
+      },
+      {
+        id: 'SZ-02',
+        name: 'Pithoragarh Safe Sector B',
+        lat: 29.5800,
+        lng: 80.2100,
+        capacity: 2200,
+        occupied: 650,
+        distance_km: 8.7,
+      },
+    ];
+
+    // Build lookup map for fast access
+    const SAFE_ZONE_MAP = {};
+    SAFE_ZONES.forEach(sz => { SAFE_ZONE_MAP[sz.id] = sz; });
+
+    const MAP_CENTER = [30.25, 79.80];
+    const MAP_ZOOM = 8;
 
     const TERMINAL_LOGS = [
       { delay: 0,    text: '>> ANALYZING HAZARD EXPOSURE...' },
       { delay: 650,  text: '>> EVALUATING CARRYING CAPACITY...' },
       { delay: 1300, text: '>> OPTIMIZING SAFE RELOCATION ROUTE...' },
     ];
+
+    /* ═══════════════════════════════════════
+       UTILITY — Compute compass bearing
+       ═══════════════════════════════════════ */
+    function computeBearing(lat1, lng1, lat2, lng2) {
+      const toRad = d => d * Math.PI / 180;
+      const dLng = toRad(lng2 - lng1);
+      const y = Math.sin(dLng) * Math.cos(toRad(lat2));
+      const x = Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
+                Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(dLng);
+      let brng = Math.atan2(y, x) * 180 / Math.PI;
+      brng = (brng + 360) % 360;
+
+      const dirs = [
+        { label: 'NORTH',      arrow: '↑',  min: 337.5, max: 360 },
+        { label: 'NORTH',      arrow: '↑',  min: 0,     max: 22.5 },
+        { label: 'NORTH-EAST', arrow: '↗', min: 22.5,  max: 67.5 },
+        { label: 'EAST',       arrow: '→',  min: 67.5,  max: 112.5 },
+        { label: 'SOUTH-EAST', arrow: '↘', min: 112.5, max: 157.5 },
+        { label: 'SOUTH',      arrow: '↓',  min: 157.5, max: 202.5 },
+        { label: 'SOUTH-WEST', arrow: '↙', min: 202.5, max: 247.5 },
+        { label: 'WEST',       arrow: '←',  min: 247.5, max: 292.5 },
+        { label: 'NORTH-WEST', arrow: '↖', min: 292.5, max: 337.5 },
+      ];
+
+      for (const d of dirs) {
+        if (brng >= d.min && brng < d.max) return { label: d.label, arrow: d.arrow };
+      }
+      return { label: 'NORTH', arrow: '↑' };
+    }
+
+    /* ═══════════════════════════════════════
+       UTILITY — Priority color helpers
+       ═══════════════════════════════════════ */
+    function getPriorityColor(priority) {
+      if (priority === 'CRITICAL') return { text: 'text-red-400', border: 'border-red-500/50', bg: 'bg-red-950/30', markerClass: 'marker-critical', ringClass: 'red' };
+      if (priority === 'HIGH')     return { text: 'text-cyan-400', border: 'border-cyan-500/50', bg: 'bg-cyan-950/30', markerClass: 'marker-high', ringClass: 'cyan' };
+      return { text: 'text-amber-400', border: 'border-amber-500/50', bg: 'bg-amber-950/30', markerClass: 'marker-moderate', ringClass: 'amber' };
+    }
+
+    function getPriorityPopupColor(priority) {
+      if (priority === 'CRITICAL') return '#ef4444';
+      if (priority === 'HIGH')     return '#22d3ee';
+      return '#f59e0b';
+    }
 
     /* ═══════════════════════════════════════
        WINDOW CONTROLS
@@ -400,40 +533,44 @@
         markersRef.current = {};
 
         habitations.forEach(hab => {
-          const isCritical = hab.risk === 'CRITICAL';
+          const pColors = getPriorityColor(hab.priority);
           const isSelected = hab.id === selectedId;
-          const baseClass = isCritical ? 'marker-critical' : 'marker-high';
-          const ringClass = isCritical ? 'red' : 'cyan';
           const size = isSelected ? 18 : 14;
 
           const icon = L.divIcon({
             className: '',
             html: `
               <div style="position:relative;width:${size}px;height:${size}px;">
-                <div class="${baseClass} ${isSelected ? 'selected' : ''}" style="width:${size}px;height:${size}px;"></div>
-                <div class="marker-ring ${ringClass}"></div>
+                <div class="${pColors.markerClass} ${isSelected ? 'selected' : ''}" style="width:${size}px;height:${size}px;"></div>
+                <div class="marker-ring ${pColors.ringClass}"></div>
               </div>
             `,
             iconSize: [size, size],
             iconAnchor: [size / 2, size / 2],
           });
 
+          const popupColor = getPriorityPopupColor(hab.priority);
+          const vulnPct = ((hab.vulnerable / hab.population) * 100).toFixed(1);
+
           const popupContent = `
             <div style="font-family:'Fira Code',monospace;padding:4px;">
               <div style="color:#22d3ee;font-size:9px;letter-spacing:0.15em;margin-bottom:4px;">TARGET_HABITATION</div>
               <div style="color:#a5f3fc;font-size:12px;font-weight:600;margin-bottom:6px;">${hab.name}</div>
               <div style="display:flex;gap:12px;font-size:9px;">
-                <span style="color:${isCritical ? '#ef4444' : '#fbbf24'};">${hab.risk}</span>
-                <span style="color:#0e7490;">SCORE: ${hab.score}%</span>
+                <span style="color:${popupColor};">${hab.priority}</span>
+                <span style="color:#0e7490;">SCORE: ${hab.risk_score}%</span>
               </div>
               <div style="font-size:9px;color:#164e63;margin-top:4px;">
-                POP: ${hab.pop.toLocaleString()} | VECTOR: ${hab.threatVector}
+                POP: ${hab.population.toLocaleString()} | VULN: ${hab.vulnerable} (${vulnPct}%)
+              </div>
+              <div style="font-size:9px;color:#164e63;margin-top:2px;">
+                HAZARD: ${hab.hazard}
               </div>
             </div>
           `;
 
           const marker = L.marker([hab.lat, hab.lng], { icon })
-            .bindPopup(popupContent, { closeButton: true, minWidth: 180 })
+            .bindPopup(popupContent, { closeButton: true, minWidth: 200 })
             .addTo(map);
 
           marker.on('click', () => {
@@ -449,7 +586,7 @@
         const map = mapInstanceRef.current;
         if (!map || !flyToTarget) return;
 
-        map.flyTo([flyToTarget.lat, flyToTarget.lng], 14, {
+        map.flyTo([flyToTarget.lat, flyToTarget.lng], 12, {
           duration: 1.2,
           easeLinearity: 0.25,
         });
@@ -471,8 +608,9 @@
 
         if (!executeOverlay) return;
 
-        const { fromLat, fromLng } = executeOverlay;
-        const { lat: toLat, lng: toLng, name: zoneName } = SAFE_ZONE;
+        const { fromLat, fromLng, safeZone } = executeOverlay;
+        const { lat: toLat, lng: toLng, name: zoneName, capacity, occupied, distance_km } = safeZone;
+        const occupancyPct = ((occupied / capacity) * 100).toFixed(1);
 
         // Green glowing marker for Safe Zone
         const safeIcon = L.divIcon({
@@ -487,16 +625,19 @@
           iconAnchor: [11, 11],
         });
 
+        const bearing = computeBearing(fromLat, fromLng, toLat, toLng);
+
         const safePopup = `
           <div style="font-family:'Fira Code',monospace;padding:4px;">
             <div style="color:#22c55e;font-size:9px;letter-spacing:0.15em;margin-bottom:4px;">✦ SAFE ZONE</div>
             <div style="color:#86efac;font-size:11px;font-weight:600;margin-bottom:4px;">${zoneName}</div>
-            <div style="font-size:9px;color:#15803d;">CAP: 1,200 / 1,850 | DIR: ↗ NE</div>
+            <div style="font-size:9px;color:#15803d;">CAP: ${occupied.toLocaleString()} / ${capacity.toLocaleString()} | DIST: ${distance_km} km</div>
+            <div style="font-size:9px;color:#15803d;margin-top:2px;">DIR: ${bearing.arrow} ${bearing.label} | OCC: ${occupancyPct}%</div>
           </div>
         `;
 
         safeZoneRef.current = L.marker([toLat, toLng], { icon: safeIcon })
-          .bindPopup(safePopup, { closeButton: true, minWidth: 200 })
+          .bindPopup(safePopup, { closeButton: true, minWidth: 220 })
           .addTo(map);
 
         // Dashed glowing cyan polyline from selected hab to safe zone
@@ -526,6 +667,9 @@
         }, 1600);
       }, [executeOverlay]);
 
+      // Derive the active safe-zone name for the overlay banner
+      const activeZoneName = executeOverlay ? executeOverlay.safeZone.name.toUpperCase() : null;
+
       return (
         <div className="h-full border border-cyan-800/50 hud-panel hud-corners flex flex-col bg-black relative overflow-hidden">
           <span className="corner-tr"></span>
@@ -544,14 +688,14 @@
             {/* HUD overlay — top-left coordinates */}
             <div className="absolute top-2 left-2 z-[400] pointer-events-none space-y-1">
               <div className="bg-black/70 border border-cyan-900/40 px-2 py-1">
-                <span className="text-cyan-700 text-[8px] tracking-wider">CENTER: 30.3165°N, 78.0322°E</span>
+                <span className="text-cyan-700 text-[8px] tracking-wider">CENTER: {MAP_CENTER[0]}°N, {MAP_CENTER[1]}°E</span>
               </div>
             </div>
 
             {/* HUD overlay — top-right info */}
             <div className="absolute top-2 right-12 z-[400] pointer-events-none">
               <div className="bg-black/70 border border-cyan-900/40 px-2 py-1">
-                <span className="text-cyan-700 text-[8px] tracking-wider">REGION: GARHWAL_HIMALAYA</span>
+                <span className="text-cyan-700 text-[8px] tracking-wider">REGION: UTTARAKHAND</span>
               </div>
             </div>
 
@@ -559,7 +703,7 @@
             {executeOverlay && (
               <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[400] pointer-events-none">
                 <div className="bg-black/80 border border-green-500/50 px-3 py-1" style={{ boxShadow: '0 0 12px rgba(34,197,94,0.3)' }}>
-                  <span className="text-green-400 text-[9px] tracking-[0.2em]">✦ ROUTE_ACTIVE — ZONE_BETA</span>
+                  <span className="text-green-400 text-[9px] tracking-[0.2em]">✦ ROUTE_ACTIVE — {activeZoneName}</span>
                 </div>
               </div>
             )}
@@ -576,6 +720,10 @@
                   <span className="flex items-center gap-1">
                     <span className="inline-block w-2 h-2 rounded-full bg-cyan-400" style={{boxShadow:'0 0 4px #22d3ee'}}></span>
                     HIGH
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block w-2 h-2 rounded-full bg-amber-400" style={{boxShadow:'0 0 4px #f59e0b'}}></span>
+                    MODERATE
                   </span>
                   {executeOverlay && (
                     <span className="flex items-center gap-1">
@@ -631,7 +779,8 @@
        HABITATION ROW
        ═══════════════════════════════════════ */
     function HabitationRow({ hab, isSelected, onAnalyze, onRemove }) {
-      const isCritical = hab.risk === 'CRITICAL';
+      const pColors = getPriorityColor(hab.priority);
+      const vulnPct = ((hab.vulnerable / hab.population) * 100).toFixed(1);
 
       return (
         <div
@@ -646,19 +795,17 @@
         >
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <span className={`text-[9px] px-1.5 py-0.5 border font-semibold tracking-wider ${
-                isCritical
-                  ? 'text-red-400 border-red-500/50 bg-red-950/30'
-                  : 'text-amber-400 border-amber-500/50 bg-amber-950/30'
-              }`}>
-                {hab.risk}
+              <span className={`text-[9px] px-1.5 py-0.5 border font-semibold tracking-wider ${pColors.text} ${pColors.border} ${pColors.bg}`}>
+                {hab.priority}
               </span>
               <span className="text-cyan-300 text-xs truncate tracking-wide">{hab.name}</span>
             </div>
-            <div className="flex items-center gap-3 mt-1">
-              <span className="text-cyan-700 text-[9px] tracking-wider">POP: {hab.pop.toLocaleString()}</span>
+            <div className="flex items-center gap-3 mt-1 flex-wrap">
+              <span className="text-cyan-700 text-[9px] tracking-wider">POP: {hab.population.toLocaleString()}</span>
               <span className="text-cyan-800 text-[9px]">|</span>
-              <span className="text-cyan-700 text-[9px] tracking-wider">THREAT: {hab.threatVector}</span>
+              <span className="text-cyan-700 text-[9px] tracking-wider">VULN: {hab.vulnerable} ({vulnPct}%)</span>
+              <span className="text-cyan-800 text-[9px]">|</span>
+              <span className="text-cyan-700 text-[9px] tracking-wider">{hab.hazard.toUpperCase()}</span>
             </div>
           </div>
 
@@ -714,7 +861,10 @@
     /* ═══════════════════════════════════════
        RECOMMENDATION CARD (post-execute)
        ═══════════════════════════════════════ */
-    function RecommendationCard() {
+    function RecommendationCard({ safeZone, fromLat, fromLng }) {
+      const occupancyPct = ((safeZone.occupied / safeZone.capacity) * 100).toFixed(1);
+      const bearing = computeBearing(fromLat, fromLng, safeZone.lat, safeZone.lng);
+
       return (
         <div
           className="slide-in-up green-glow-pulse relative overflow-hidden"
@@ -744,7 +894,7 @@
             <div>
               <div className="text-green-700 text-[8px] tracking-[0.25em] mb-0.5">ZONE_DESIGNATION</div>
               <div className="text-green-300 text-sm font-bold tracking-wider" style={{ textShadow: '0 0 8px rgba(34,197,94,0.5)' }}>
-                {SAFE_ZONE.name}
+                {safeZone.name}
               </div>
             </div>
 
@@ -754,11 +904,11 @@
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <div className="text-green-700 text-[8px] tracking-[0.2em]">RECOMMENDED DIRECTION</div>
-                <div className="text-green-300 text-xs font-semibold tracking-wider">↗ NORTH-EAST (4.2 km)</div>
+                <div className="text-green-300 text-xs font-semibold tracking-wider">{bearing.arrow} {bearing.label} ({safeZone.distance_km} km)</div>
               </div>
               <div className="space-y-1">
                 <div className="text-green-700 text-[8px] tracking-[0.2em]">SHELTER CAPACITY</div>
-                <div className="text-green-300 text-xs font-semibold tracking-wider">1,200 / 1,850</div>
+                <div className="text-green-300 text-xs font-semibold tracking-wider">{safeZone.occupied.toLocaleString()} / {safeZone.capacity.toLocaleString()}</div>
               </div>
             </div>
 
@@ -766,13 +916,13 @@
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-green-700 text-[8px] tracking-wider">OCCUPANCY LOAD</span>
-                <span className="text-green-400 text-[8px]">64.9%</span>
+                <span className="text-green-400 text-[8px]">{occupancyPct}%</span>
               </div>
               <div className="w-full h-1 bg-green-950 overflow-hidden rounded-sm">
                 <div
                   className="h-full rounded-sm transition-all duration-1000"
                   style={{
-                    width: '64.9%',
+                    width: `${occupancyPct}%`,
                     background: 'linear-gradient(to right, #22c55e, #4ade80)',
                     boxShadow: '0 0 6px rgba(34,197,94,0.6)',
                   }}
@@ -797,6 +947,7 @@
       /*  phase: 'idle' | 'loading' | 'done'  */
       const [phase, setPhase] = useState('idle');
       const [logCount, setLogCount] = useState(0);
+      const [activeSafeZone, setActiveSafeZone] = useState(null);
       const timerRefs = useRef([]);
 
       // Reset when selected habitation changes
@@ -805,10 +956,15 @@
         timerRefs.current = [];
         setPhase('idle');
         setLogCount(0);
+        setActiveSafeZone(null);
       }, [selectedId]);
 
       const handleExecute = useCallback(() => {
         if (phase !== 'idle' || !selected) return;
+
+        // Look up safe zone from the selected habitation's safe_zone_id
+        const safeZone = SAFE_ZONE_MAP[selected.safe_zone_id];
+        if (!safeZone) return;
 
         setPhase('loading');
         setLogCount(0);
@@ -822,13 +978,17 @@
         // After 2s: transition to done, trigger map overlay
         const doneTimer = setTimeout(() => {
           setPhase('done');
-          onExecuteOverlay({ fromLat: selected.lat, fromLng: selected.lng });
+          setActiveSafeZone(safeZone);
+          onExecuteOverlay({ fromLat: selected.lat, fromLng: selected.lng, safeZone });
         }, 2000);
         timerRefs.current.push(doneTimer);
       }, [phase, selected, onExecuteOverlay]);
 
       const isLoading = phase === 'loading';
       const isDone    = phase === 'done';
+
+      // Derive vulnerability percentage for risk metrics
+      const vulnPct = selected ? ((selected.vulnerable / selected.population) * 100).toFixed(1) : 0;
 
       return (
         <div className="h-full flex flex-col border border-cyan-800/50 hud-panel hud-corners bg-black overflow-hidden">
@@ -930,7 +1090,13 @@
             )}
 
             {/* Recommendation card (shown only after done) */}
-            {isDone && <RecommendationCard />}
+            {isDone && activeSafeZone && (
+              <RecommendationCard
+                safeZone={activeSafeZone}
+                fromLat={selected.lat}
+                fromLng={selected.lng}
+              />
+            )}
 
             {/* Risk Metrics Widget */}
             <div className="border border-cyan-800/40 hud-panel hud-corners relative">
@@ -939,8 +1105,8 @@
 
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-cyan-900/40">
                 <span className="text-cyan-700 text-[9px] tracking-[0.2em]">RISK_METRICS</span>
-                <span className={`text-[9px] tracking-wider ${selected ? (selected.score >= 85 ? 'text-red-500' : 'text-amber-500') : 'text-cyan-800'}`}>
-                  {selected ? `THREAT_LEVEL: ${selected.risk}` : 'NO_SELECTION'}
+                <span className={`text-[9px] tracking-wider ${selected ? (selected.risk_score >= 85 ? 'text-red-500' : selected.risk_score >= 60 ? 'text-amber-500' : 'text-cyan-500') : 'text-cyan-800'}`}>
+                  {selected ? `THREAT_LEVEL: ${selected.priority}` : 'NO_SELECTION'}
                 </span>
               </div>
 
@@ -950,8 +1116,8 @@
                     <div className="flex-1 space-y-3">
                       <div>
                         <div className="text-cyan-700 text-[9px] tracking-[0.2em] mb-1">COMPOSITE RISK SCORE</div>
-                        <div className={`text-3xl font-bold tracking-wider ${selected.score >= 85 ? 'text-red-400' : 'text-cyan-300'}`}>
-                          {selected.score}%
+                        <div className={`text-3xl font-bold tracking-wider ${selected.risk_score >= 85 ? 'text-red-400' : selected.risk_score >= 60 ? 'text-amber-400' : 'text-cyan-300'}`}>
+                          {selected.risk_score}%
                         </div>
                       </div>
                       <div className="space-y-1.5">
@@ -959,36 +1125,36 @@
                           <span className="text-cyan-700 text-[9px] tracking-wider">HAZARD_INT</span>
                           <div className="flex items-center gap-2">
                             <div className="w-20 h-1 bg-cyan-950 overflow-hidden">
-                              <div className="h-full bg-cyan-500 transition-all duration-700" style={{ width: `${Math.min(selected.score + 5, 100)}%` }}></div>
+                              <div className="h-full bg-cyan-500 transition-all duration-700" style={{ width: `${Math.min(selected.risk_score + 5, 100)}%` }}></div>
                             </div>
-                            <span className="text-cyan-500 text-[9px]">{Math.min(selected.score + 5, 100).toFixed(1)}</span>
+                            <span className="text-cyan-500 text-[9px]">{Math.min(selected.risk_score + 5, 100).toFixed(1)}</span>
                           </div>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-cyan-700 text-[9px] tracking-wider">VULN_POP</span>
                           <div className="flex items-center gap-2">
                             <div className="w-20 h-1 bg-cyan-950 overflow-hidden">
-                              <div className="h-full bg-amber-500 transition-all duration-700" style={{ width: `${Math.max(selected.score - 12, 0)}%` }}></div>
+                              <div className="h-full bg-amber-500 transition-all duration-700" style={{ width: `${vulnPct}%` }}></div>
                             </div>
-                            <span className="text-amber-500 text-[9px]">{Math.max(selected.score - 12, 0).toFixed(1)}</span>
+                            <span className="text-amber-500 text-[9px]">{vulnPct}</span>
                           </div>
                         </div>
                         <div className="flex items-center justify-between">
                           <span className="text-cyan-700 text-[9px] tracking-wider">INFRA_DEF</span>
                           <div className="flex items-center gap-2">
                             <div className="w-20 h-1 bg-cyan-950 overflow-hidden">
-                              <div className="h-full bg-red-500 transition-all duration-700" style={{ width: `${Math.min(selected.score + 3, 100)}%` }}></div>
+                              <div className="h-full bg-red-500 transition-all duration-700" style={{ width: `${Math.min(selected.risk_score + 3, 100)}%` }}></div>
                             </div>
-                            <span className="text-red-500 text-[9px]">{Math.min(selected.score + 3, 100).toFixed(1)}</span>
+                            <span className="text-red-500 text-[9px]">{Math.min(selected.risk_score + 3, 100).toFixed(1)}</span>
                           </div>
                         </div>
                       </div>
                       <div className="text-cyan-800 text-[9px] tracking-wider pt-1 border-t border-cyan-900/30">
-                        VECTOR: {selected.threatVector} | POP: {selected.pop.toLocaleString()}
+                        HAZARD: {selected.hazard.toUpperCase()} | POP: {selected.population.toLocaleString()} | VULN: {selected.vulnerable}
                       </div>
                     </div>
                     <div className="shrink-0">
-                      <DonutChart key={selected.id} score={selected.score} />
+                      <DonutChart key={selected.id} score={selected.risk_score} />
                     </div>
                   </div>
                 ) : (
@@ -1093,7 +1259,7 @@
 
           <footer className="flex items-center justify-between px-4 py-1 border-t border-cyan-900/40 text-[8px] text-cyan-900 tracking-[0.2em]">
             <span>DRIP — DISASTER RELOCATION INTELLIGENCE PLATFORM &copy; 2026</span>
-            <span>BUILD 0.9.2-ALPHA</span>
+            <span>BUILD 1.0.0-ALPHA</span>
             <span>NODE: PRIMARY | UPLINK: STABLE</span>
           </footer>
         </div>
