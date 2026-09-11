@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DRIP — Disaster Relocation Intelligence Platform</title>
+  <meta name="description" content="Cyberpunk HUD command terminal for disaster relocation decision support. Analyzes hazard intensity, population vulnerability, and recommends relocation zones." />
+
+  <!-- React 18 -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Tailwind CSS 3 -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Fira Code Monospace Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            mono: ['"Fira Code"', 'Courier New', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; padding: 0; background: #000; font-family: 'Fira Code', 'Courier New', monospace; overflow: hidden; }
+
+    /* ── Scanline overlay ── */
+    .scanlines::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0, 255, 255, 0.015) 2px,
+        rgba(0, 255, 255, 0.015) 4px
+      );
+    }
+
+    /* ── Blinking cursor ── */
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0; }
+    }
+    .cursor-blink {
+      animation: blink 1s step-end infinite;
+    }
+
+    /* ── Glow pulse on selected row ── */
+    @keyframes glowPulse {
+      0%, 100% { box-shadow: inset 0 0 8px rgba(0, 255, 255, 0.1); }
+      50% { box-shadow: inset 0 0 18px rgba(0, 255, 255, 0.25); }
+    }
+    .glow-pulse {
+      animation: glowPulse 2s ease-in-out infinite;
+    }
+
+    /* ── HUD bracket corners ── */
+    .hud-panel {
+      position: relative;
+    }
+    .hud-panel::before,
+    .hud-panel::after {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      pointer-events: none;
+    }
+    .hud-panel::before {
+      top: -1px; left: -1px;
+      border-top: 2px solid #22d3ee;
+      border-left: 2px solid #22d3ee;
+    }
+    .hud-panel::after {
+      bottom: -1px; right: -1px;
+      border-bottom: 2px solid #22d3ee;
+      border-right: 2px solid #22d3ee;
+    }
+    /* Additional corners via inner pseudo */
+    .hud-corners { position: relative; }
+    .hud-corners .corner-tr,
+    .hud-corners .corner-bl {
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      pointer-events: none;
+    }
+    .hud-corners .corner-tr {
+      top: -1px; right: -1px;
+      border-top: 2px solid #22d3ee;
+      border-right: 2px solid #22d3ee;
+    }
+    .hud-corners .corner-bl {
+      bottom: -1px; left: -1px;
+      border-bottom: 2px solid #22d3ee;
+      border-left: 2px solid #22d3ee;
+    }
+
+    /* ── Execute button glow ── */
+    .execute-btn {
+      transition: all 0.2s ease;
+      text-shadow: 0 0 6px rgba(0, 255, 255, 0.4);
+    }
+    .execute-btn:hover {
+      background: #22d3ee !important;
+      color: #000 !important;
+      text-shadow: none;
+      box-shadow: 0 0 30px rgba(0, 255, 255, 0.6), 0 0 60px rgba(0, 255, 255, 0.3);
+    }
+
+    /* ── Subtle flicker for the map offline text ── */
+    @keyframes flicker {
+      0%, 95%, 100% { opacity: 1; }
+      96% { opacity: 0.6; }
+      97% { opacity: 1; }
+      98% { opacity: 0.4; }
+      99% { opacity: 1; }
+    }
+    .flicker { animation: flicker 5s infinite; }
+
+    /* ── Custom scrollbar ── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #164e63; border-radius: 2px; }
+    ::-webkit-scrollbar-thumb:hover { background: #22d3ee; }
+
+    /* ── Donut ring animation ── */
+    @keyframes donutDraw {
+      from { stroke-dashoffset: 251.2; }
+    }
+    .donut-animate {
+      animation: donutDraw 1.2s ease-out forwards;
+    }
+
+    /* ── Dot grid background for map panel ── */
+    .dot-grid {
+      background-image: radial-gradient(circle, rgba(0,255,255,0.08) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+
+    /* ── Data stream animation ── */
+    @keyframes dataStream {
+      0% { transform: translateY(-100%); opacity: 0; }
+      10% { opacity: 0.5; }
+      90% { opacity: 0.5; }
+      100% { transform: translateY(100vh); opacity: 0; }
+    }
+  </style>
+</head>
+<body class="scanlines">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo } = React;
+
+    /* ═══════════════════════════════════════
+       MOCK DATA
+       ═══════════════════════════════════════ */
+    const HABITATIONS = [
+      { id: 1, name: 'Sector 4 — Slope A',      risk: 'CRITICAL', score: 89.7,  pop: 2340, threatVector: 'LANDSLIDE' },
+      { id: 2, name: 'Village Alpha',            risk: 'HIGH',     score: 76.2,  pop: 1120, threatVector: 'FLOOD' },
+      { id: 3, name: 'Valley Settlement 09',     risk: 'CRITICAL', score: 93.1,  pop: 4510, threatVector: 'SEISMIC' },
+      { id: 4, name: 'East Ridge — Block C',     risk: 'HIGH',     score: 68.4,  pop: 890,  threatVector: 'EROSION' },
+    ];
+
+    /* ═══════════════════════════════════════
+       WINDOW CONTROL DOTS
+       ═══════════════════════════════════════ */
+    function WindowControls() {
+      return (
+        <div className="flex items-center gap-1.5 select-none" aria-hidden="true">
+          <span className="text-cyan-600 text-xs font-bold cursor-default hover:text-cyan-300 transition-colors">_</span>
+          <span className="text-cyan-600 text-xs font-bold cursor-default hover:text-cyan-300 transition-colors">[]</span>
+          <span className="text-red-600 text-xs font-bold cursor-default hover:text-red-400 transition-colors">X</span>
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════
+       STATUS BAR (top)
+       ═══════════════════════════════════════ */
+    function StatusBar() {
+      const [time, setTime] = useState(new Date());
+      useEffect(() => {
+        const t = setInterval(() => setTime(new Date()), 1000);
+        return () => clearInterval(t);
+      }, []);
+
+      const fmt = (n) => String(n).padStart(2, '0');
+      const ts = `${fmt(time.getHours())}:${fmt(time.getMinutes())}:${fmt(time.getSeconds())}`;
+
+      return (
+        <header className="flex items-center justify-between px-4 py-2 border-b border-cyan-900/60 bg-cyan-950/20 select-none">
+          <div className="flex items-center gap-3">
+            <span className="text-cyan-400 text-[10px] tracking-[0.3em] uppercase">◆ DRIP_SYS</span>
+            <span className="text-cyan-700 text-[10px]">|</span>
+            <span className="text-cyan-600 text-[10px] tracking-wider">DISASTER RELOCATION INTELLIGENCE PLATFORM</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-cyan-500 text-[10px] tracking-widest font-light">{ts} IST</span>
+            <span className="text-cyan-700 text-[10px]">|</span>
+            <span className="text-green-500 text-[10px] tracking-wider">● ONLINE</span>
+            <WindowControls />
+          </div>
+        </header>
+      );
+    }
+
+    /* ═══════════════════════════════════════
+       MAP PANEL (Left — 60%)
+       ═══════════════════════════════════════ */
+    function MapPanel() {
+      return (
+        <div className="h-full border border-cyan-800/50 hud-panel hud-corners flex flex-col bg-black relative overflow-hidden">
+          <span className="corner-tr"></span>
+          <span className="corner-bl"></span>
+
+          {/* Panel header */}
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-cyan-900/40">
+            <span className="text-cyan-600 text-[10px] tracking-[0.2em] uppercase">MAP_INTERFACE</span>
+            <WindowControls />
+          </div>
+
+          {/* Map placeholder */}
+          <div className="flex-1 flex items-center justify-center dot-grid relative">
+            {/* Crosshair lines */}
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute top-1/2 left-0 right-0 h-px bg-cyan-900/30"></div>
+              <div className="absolute left-1/2 top-0 bottom-0 w-px bg-cyan-900/30"></div>
+            </div>
+
+            {/* Corner coordinates */}
+            <span className="absolute top-3 left-3 text-cyan-800 text-[9px]">28.6139°N</span>
+            <span className="absolute top-3 right-3 text-cyan-800 text-[9px]">77.2090°E</span>
+            <span className="absolute bottom-3 left-3 text-cyan-800 text-[9px]">ZOOM: 12x</span>
+            <span className="absolute bottom-3 right-3 text-cyan-800 text-[9px]">LAYER: TOPO</span>
+
+            <div className="text-center flicker">
+              <div className="text-cyan-500/60 text-sm tracking-[0.25em] mb-2">
+                &gt;&gt; MAP_SYSTEM_OFFLINE
+              </div>
+              <div className="text-cyan-700/50 text-xs tracking-[0.15em]">
+                // LEAFLET_PENDING
+              </div>
+              <div className="mt-4 w-8 h-8 border border-cyan-700/30 mx-auto flex items-center justify-center">
+                <div className="w-3 h-3 border border-cyan-600/40 rotate-45"></div>
+              </div>
+              <div className="text-cyan-900 text-[9px] mt-4 tracking-wider">
+                AWAITING GEOSPATIAL DATA FEED...
+              </div>
+            </div>
+          </div>
+
+          {/* Bottom bar */}
+          <div className="flex items-center justify-between px-3 py-1 border-t border-cyan-900/40 text-[9px] text-cyan-800 tracking-wider">
+            <span>TILES: 0 LOADED</span>
+            <span>LAT/LNG: —</span>
+            <span>RENDER: IDLE</span>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════
+       DONUT RING SVG
+       ═══════════════════════════════════════ */
+    function DonutChart({ score }) {
+      const radius = 40;
+      const circumference = 2 * Math.PI * radius;
+      const filled = (score / 100) * circumference;
+      const remaining = circumference - filled;
+      const isCritical = score >= 85;
+
+      return (
+        <svg width="110" height="110" viewBox="0 0 110 110" className="drop-shadow-lg">
+          {/* Outer decorative ring */}
+          <circle cx="55" cy="55" r="52" fill="none" stroke="rgba(0,255,255,0.06)" strokeWidth="1" />
+
+          {/* Track */}
+          <circle
+            cx="55" cy="55" r={radius}
+            fill="none"
+            stroke="rgba(0,255,255,0.1)"
+            strokeWidth="8"
+          />
+
+          {/* Filled arc */}
+          <circle
+            cx="55" cy="55" r={radius}
+            fill="none"
+            stroke={isCritical ? '#ef4444' : '#22d3ee'}
+            strokeWidth="8"
+            strokeDasharray={`${filled} ${remaining}`}
+            strokeDashoffset={circumference * 0.25}
+            strokeLinecap="round"
+            className="donut-animate"
+            style={{
+              filter: `drop-shadow(0 0 6px ${isCritical ? 'rgba(239,68,68,0.5)' : 'rgba(34,211,238,0.5)'})`,
+            }}
+          />
+
+          {/* Center text */}
+          <text x="55" y="51" textAnchor="middle" className="fill-cyan-300 text-sm" style={{ fontFamily: "'Fira Code', monospace", fontSize: '14px', fontWeight: 600 }}>
+            {score}%
+          </text>
+          <text x="55" y="67" textAnchor="middle" className="fill-cyan-700" style={{ fontFamily: "'Fira Code', monospace", fontSize: '8px' }}>
+            RISK
+          </text>
+        </svg>
+      );
+    }
+
+    /* ═══════════════════════════════════════
+       HABITATION ROW
+       ═══════════════════════════════════════ */
+    function HabitationRow({ hab, isSelected, onSelect, onRemove }) {
+      const isCritical = hab.risk === 'CRITICAL';
+
+      return (
+        <div
+          className={`
+            flex items-center justify-between px-3 py-2.5 border border-transparent transition-all duration-300 group cursor-pointer
+            ${isSelected
+              ? 'bg-cyan-900/40 border-cyan-500/40 glow-pulse'
+              : 'hover:bg-cyan-950/30 hover:border-cyan-800/30'
+            }
+          `}
+          onClick={onSelect}
+        >
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={`text-[9px] px-1.5 py-0.5 border font-semibold tracking-wider ${
+                isCritical
+                  ? 'text-red-400 border-red-500/50 bg-red-950/30'
+                  : 'text-amber-400 border-amber-500/50 bg-amber-950/30'
+              }`}>
+                {hab.risk}
+              </span>
+              <span className="text-cyan-300 text-xs truncate tracking-wide">{hab.name}</span>
+            </div>
+            <div className="flex items-center gap-3 mt-1">
+              <span className="text-cyan-700 text-[9px] tracking-wider">POP: {hab.pop.toLocaleString()}</span>
+              <span className="text-cyan-800 text-[9px]">|</span>
+              <span className="text-cyan-700 text-[9px] tracking-wider">THREAT: {hab.threatVector}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 ml-3 shrink-0">
+            <button
+              onClick={(e) => { e.stopPropagation(); onSelect(); }}
+              className={`text-[10px] tracking-wider px-2 py-1 border transition-all duration-200 ${
+                isSelected
+                  ? 'text-black bg-cyan-400 border-cyan-400'
+                  : 'text-cyan-400 border-cyan-700/50 hover:border-cyan-400 hover:bg-cyan-950/50'
+              }`}
+            >
+              [ ANALYZE ]
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onRemove(hab.id); }}
+              className="text-[10px] tracking-wider px-2 py-1 border text-red-500 border-red-800/50 hover:border-red-500 hover:bg-red-950/50 transition-all duration-200"
+            >
+              [ X ]
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════
+       COMMAND TERMINAL (Right — 40%)
+       ═══════════════════════════════════════ */
+    function CommandTerminal() {
+      const [selectedId, setSelectedId] = useState(null);
+      const [habitations, setHabitations] = useState(HABITATIONS);
+      const [executed, setExecuted] = useState(false);
+
+      const selected = useMemo(
+        () => habitations.find(h => h.id === selectedId) || null,
+        [selectedId, habitations]
+      );
+
+      const handleRemove = (id) => {
+        setHabitations(prev => prev.filter(h => h.id !== id));
+        if (selectedId === id) setSelectedId(null);
+      };
+
+      const handleExecute = () => {
+        setExecuted(true);
+        setTimeout(() => setExecuted(false), 2000);
+      };
+
+      return (
+        <div className="h-full flex flex-col border border-cyan-800/50 hud-panel hud-corners bg-black overflow-hidden">
+          <span className="corner-tr"></span>
+          <span className="corner-bl"></span>
+
+          {/* Panel header bar */}
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-cyan-900/40">
+            <span className="text-cyan-600 text-[10px] tracking-[0.2em] uppercase">COMMAND_TERMINAL</span>
+            <WindowControls />
+          </div>
+
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto px-4 py-3 space-y-4">
+
+            {/* ── Header ── */}
+            <div>
+              <div className="text-cyan-600 text-[10px] tracking-[0.2em] mb-1">
+                &gt;&gt; RELOCATION_PROTOCOL_V1.0
+              </div>
+              <h1 className="text-cyan-300 text-lg font-bold tracking-wider leading-tight">
+                CRITICAL ZONES DETECTED<span className="cursor-blink text-cyan-400">_</span>
+              </h1>
+              <div className="text-cyan-800 text-[9px] tracking-wider mt-1">
+                {habitations.length} HABITATION{habitations.length !== 1 ? 'S' : ''} FLAGGED FOR RELOCATION ANALYSIS
+              </div>
+            </div>
+
+            {/* ── Habitations List ── */}
+            <div className="border border-cyan-800/40 hud-panel hud-corners relative">
+              <span className="corner-tr"></span>
+              <span className="corner-bl"></span>
+
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-cyan-900/40">
+                <span className="text-cyan-700 text-[9px] tracking-[0.2em]">HABITATION_REGISTRY</span>
+                <span className="text-cyan-800 text-[9px]">{habitations.length} ENTRIES</span>
+              </div>
+
+              <div className="divide-y divide-cyan-900/20">
+                {habitations.length > 0 ? (
+                  habitations.map(hab => (
+                    <HabitationRow
+                      key={hab.id}
+                      hab={hab}
+                      isSelected={selectedId === hab.id}
+                      onSelect={() => setSelectedId(hab.id === selectedId ? null : hab.id)}
+                      onRemove={handleRemove}
+                    />
+                  ))
+                ) : (
+                  <div className="px-3 py-6 text-center text-cyan-800 text-xs tracking-wider">
+                    NO HABITATIONS IN REGISTRY
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ── Execute Action ── */}
+            <div>
+              <div className="text-cyan-500 text-[10px] tracking-[0.2em] mb-2">
+                INITIATE OVERRIDE?
+              </div>
+              <button
+                onClick={handleExecute}
+                disabled={!selected}
+                className={`execute-btn w-full py-3 border-2 text-sm font-bold tracking-[0.3em] uppercase transition-all duration-200
+                  ${selected
+                    ? 'border-cyan-500 text-cyan-400 bg-cyan-950/20 hover:bg-cyan-400 hover:text-black'
+                    : 'border-cyan-900/40 text-cyan-800 bg-transparent cursor-not-allowed'
+                  }
+                  ${executed ? 'bg-cyan-400 !text-black border-cyan-300' : ''}
+                `}
+              >
+                {executed ? '>> PROTOCOL EXECUTED ✓' : '> EXECUTE'}
+              </button>
+              {!selected && (
+                <div className="text-cyan-800 text-[9px] tracking-wider mt-1 text-center">
+                  SELECT A HABITATION TO ENABLE EXECUTION
+                </div>
+              )}
+            </div>
+
+            {/* ── Risk Metrics Widget ── */}
+            <div className="border border-cyan-800/40 hud-panel hud-corners relative">
+              <span className="corner-tr"></span>
+              <span className="corner-bl"></span>
+
+              <div className="flex items-center justify-between px-3 py-1.5 border-b border-cyan-900/40">
+                <span className="text-cyan-700 text-[9px] tracking-[0.2em]">RISK_METRICS</span>
+                <span className={`text-[9px] tracking-wider ${selected ? (selected.score >= 85 ? 'text-red-500' : 'text-amber-500') : 'text-cyan-800'}`}>
+                  {selected ? `THREAT_LEVEL: ${selected.risk}` : 'NO_SELECTION'}
+                </span>
+              </div>
+
+              <div className="px-4 py-4">
+                {selected ? (
+                  <div className="flex items-center gap-6">
+                    {/* Score readout */}
+                    <div className="flex-1 space-y-3">
+                      <div>
+                        <div className="text-cyan-700 text-[9px] tracking-[0.2em] mb-1">COMPOSITE RISK SCORE</div>
+                        <div className={`text-3xl font-bold tracking-wider ${selected.score >= 85 ? 'text-red-400' : 'text-cyan-300'}`}>
+                          {selected.score}%
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-cyan-700 text-[9px] tracking-wider">HAZARD_INT</span>
+                          <div className="flex items-center gap-2">
+                            <div className="w-20 h-1 bg-cyan-950 overflow-hidden">
+                              <div className="h-full bg-cyan-500 transition-all duration-700" style={{ width: `${Math.min(selected.score + 5, 100)}%` }}></div>
+                            </div>
+                            <span className="text-cyan-500 text-[9px]">{Math.min(selected.score + 5, 100).toFixed(1)}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-cyan-700 text-[9px] tracking-wider">VULN_POP</span>
+                          <div className="flex items-center gap-2">
+                            <div className="w-20 h-1 bg-cyan-950 overflow-hidden">
+                              <div className="h-full bg-amber-500 transition-all duration-700" style={{ width: `${Math.max(selected.score - 12, 0)}%` }}></div>
+                            </div>
+                            <span className="text-amber-500 text-[9px]">{Math.max(selected.score - 12, 0).toFixed(1)}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-cyan-700 text-[9px] tracking-wider">INFRA_DEF</span>
+                          <div className="flex items-center gap-2">
+                            <div className="w-20 h-1 bg-cyan-950 overflow-hidden">
+                              <div className="h-full bg-red-500 transition-all duration-700" style={{ width: `${Math.min(selected.score + 3, 100)}%` }}></div>
+                            </div>
+                            <span className="text-red-500 text-[9px]">{Math.min(selected.score + 3, 100).toFixed(1)}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-cyan-800 text-[9px] tracking-wider pt-1 border-t border-cyan-900/30">
+                        VECTOR: {selected.threatVector} | POP: {selected.pop.toLocaleString()}
+                      </div>
+                    </div>
+
+                    {/* Donut chart */}
+                    <div className="shrink-0">
+                      <DonutChart key={selected.id} score={selected.score} />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center py-6">
+                    <div className="text-center">
+                      <div className="text-cyan-800 text-[10px] tracking-[0.2em]">
+                        AWAITING TARGET SELECTION...
+                      </div>
+                      <div className="text-cyan-900 text-[9px] tracking-wider mt-1">
+                        SELECT A HABITATION TO VIEW RISK ANALYSIS
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+          </div>
+
+          {/* Terminal footer */}
+          <div className="px-3 py-1.5 border-t border-cyan-900/40 flex items-center justify-between text-[9px] text-cyan-800 tracking-wider">
+            <span>SIH_26191</span>
+            <span>ENGINE: RISK_ANALYZER_v2.4</span>
+            <span>◆ READY</span>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════
+       MAIN APP
+       ═══════════════════════════════════════ */
+    function App() {
+      return (
+        <div className="h-screen w-screen bg-black font-mono flex flex-col text-cyan-400 overflow-hidden select-none">
+          {/* Top status bar */}
+          <StatusBar />
+
+          {/* Main content — 60/40 split */}
+          <main className="flex-1 flex gap-2 p-2 overflow-hidden">
+            {/* Left panel — Map (60%) */}
+            <section className="w-[60%] shrink-0">
+              <MapPanel />
+            </section>
+
+            {/* Right panel — Terminal (40%) */}
+            <section className="w-[40%] shrink-0">
+              <CommandTerminal />
+            </section>
+          </main>
+
+          {/* Bottom bar */}
+          <footer className="flex items-center justify-between px-4 py-1 border-t border-cyan-900/40 text-[8px] text-cyan-900 tracking-[0.2em]">
+            <span>DRIP — DISASTER RELOCATION INTELLIGENCE PLATFORM © 2026</span>
+            <span>BUILD 0.9.1-ALPHA</span>
+            <span>NODE: PRIMARY | UPLINK: STABLE</span>
+          </footer>
+        </div>
+      );
+    }
+
+    /* ── Mount ── */
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
