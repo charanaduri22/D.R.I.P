@@ -113,11 +113,15 @@
       transition: all 0.2s ease;
       text-shadow: 0 0 6px rgba(0, 255, 255, 0.4);
     }
-    .execute-btn:hover {
+    .execute-btn:hover:not(:disabled) {
       background: #22d3ee !important;
       color: #000 !important;
       text-shadow: none;
       box-shadow: 0 0 30px rgba(0, 255, 255, 0.6), 0 0 60px rgba(0, 255, 255, 0.3);
+    }
+    .execute-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
     }
 
     /* ── Subtle flicker ── */
@@ -187,6 +191,10 @@
       0%, 100% { box-shadow: 0 0 6px 2px rgba(34,211,238,0.5), 0 0 16px 4px rgba(34,211,238,0.2); }
       50% { box-shadow: 0 0 10px 4px rgba(34,211,238,0.7), 0 0 28px 8px rgba(34,211,238,0.3); }
     }
+    @keyframes markerPulseGreen {
+      0%, 100% { box-shadow: 0 0 6px 2px rgba(34,197,94,0.5), 0 0 16px 4px rgba(34,197,94,0.2); }
+      50% { box-shadow: 0 0 10px 4px rgba(34,197,94,0.8), 0 0 32px 10px rgba(34,197,94,0.35); }
+    }
     .marker-critical {
       width: 14px; height: 14px;
       background: #ef4444;
@@ -217,6 +225,16 @@
       border: 3px solid #fff;
       transform: scale(1.3);
     }
+    .marker-safe-zone {
+      width: 20px; height: 20px;
+      background: #22c55e;
+      border: 2px solid #86efac;
+      border-radius: 50%;
+      animation: markerPulseGreen 2s ease-in-out infinite;
+      cursor: pointer;
+      transition: transform 0.2s ease;
+    }
+    .marker-safe-zone:hover { transform: scale(1.4); }
 
     /* ── Marker ring (outer pulse ring) ── */
     @keyframes ringExpand {
@@ -235,6 +253,37 @@
     }
     .marker-ring.red { border-color: #ef4444; }
     .marker-ring.cyan { border-color: #22d3ee; }
+    .marker-ring.green { border-color: #22c55e; }
+
+    /* ── Terminal log typewriter ── */
+    @keyframes typeIn {
+      from { opacity: 0; transform: translateX(-6px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .log-line { animation: typeIn 0.35s ease forwards; }
+
+    /* ── Recommendation card slide-in ── */
+    @keyframes slideInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .slide-in-up { animation: slideInUp 0.5s cubic-bezier(0.22,1,0.36,1) forwards; }
+
+    /* ── Green glow pulse for rec card ── */
+    @keyframes greenGlow {
+      0%, 100% { box-shadow: 0 0 10px rgba(34,197,94,0.25), inset 0 0 8px rgba(34,197,94,0.06); }
+      50%       { box-shadow: 0 0 22px rgba(34,197,94,0.45), inset 0 0 16px rgba(34,197,94,0.12); }
+    }
+    .green-glow-pulse { animation: greenGlow 2.5s ease-in-out infinite; }
+
+    /* ── Pulsing dots for loading ── */
+    @keyframes dotPulse {
+      0%, 80%, 100% { opacity: 0.2; }
+      40%           { opacity: 1; }
+    }
+    .dot-1 { animation: dotPulse 1.2s ease-in-out 0s    infinite; }
+    .dot-2 { animation: dotPulse 1.2s ease-in-out 0.2s  infinite; }
+    .dot-3 { animation: dotPulse 1.2s ease-in-out 0.4s  infinite; }
   </style>
 </head>
 <body class="scanlines">
@@ -244,7 +293,7 @@
     const { useState, useEffect, useMemo, useRef, useCallback } = React;
 
     /* ═══════════════════════════════════════
-       MOCK DATA — with coordinates in the Uttarakhand / Garhwal Himalaya region
+       MOCK DATA
        ═══════════════════════════════════════ */
     const HABITATIONS = [
       { id: 1, name: 'Sector 4 — Slope A',    risk: 'CRITICAL', score: 89.7, pop: 2340, threatVector: 'LANDSLIDE', lat: 30.3465, lng: 78.0620 },
@@ -253,8 +302,15 @@
       { id: 4, name: 'East Ridge — Block C',   risk: 'HIGH',     score: 68.4, pop: 890,  threatVector: 'EROSION',   lat: 30.3100, lng: 78.0800 },
     ];
 
+    const SAFE_ZONE = { name: 'Zone Beta — High Plateau', lat: 30.4120, lng: 78.0450 };
     const MAP_CENTER = [30.3165, 78.0322];
     const MAP_ZOOM = 12;
+
+    const TERMINAL_LOGS = [
+      { delay: 0,    text: '>> ANALYZING HAZARD EXPOSURE...' },
+      { delay: 650,  text: '>> EVALUATING CARRYING CAPACITY...' },
+      { delay: 1300, text: '>> OPTIMIZING SAFE RELOCATION ROUTE...' },
+    ];
 
     /* ═══════════════════════════════════════
        WINDOW CONTROLS
@@ -301,16 +357,17 @@
 
     /* ═══════════════════════════════════════
        LEAFLET MAP PANEL (Left — 60%)
-       Uses Leaflet directly via useRef/useEffect
        ═══════════════════════════════════════ */
-    function MapPanel({ habitations, selectedId, onSelectHabitation, flyToTarget }) {
+    function MapPanel({ habitations, selectedId, onSelectHabitation, flyToTarget, executeOverlay }) {
       const mapContainerRef = useRef(null);
-      const mapInstanceRef = useRef(null);
-      const markersRef = useRef({});
+      const mapInstanceRef  = useRef(null);
+      const markersRef      = useRef({});
+      const safeZoneRef     = useRef(null);
+      const polylineRef     = useRef(null);
 
-      // Initialize the Leaflet map once
+      // Initialize Leaflet map once
       useEffect(() => {
-        if (mapInstanceRef.current) return; // already initialized
+        if (mapInstanceRef.current) return;
 
         const map = L.map(mapContainerRef.current, {
           center: MAP_CENTER,
@@ -319,7 +376,6 @@
           attributionControl: true,
         });
 
-        // CartoDB Dark Matter tiles
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
           subdomains: 'abcd',
@@ -327,8 +383,6 @@
         }).addTo(map);
 
         mapInstanceRef.current = map;
-
-        // Force a resize after a tick so tiles render correctly
         setTimeout(() => map.invalidateSize(), 100);
 
         return () => {
@@ -337,12 +391,11 @@
         };
       }, []);
 
-      // Sync markers whenever habitations change
+      // Sync hazard markers
       useEffect(() => {
         const map = mapInstanceRef.current;
         if (!map) return;
 
-        // Remove old markers
         Object.values(markersRef.current).forEach(m => map.removeLayer(m));
         markersRef.current = {};
 
@@ -391,7 +444,7 @@
         });
       }, [habitations, selectedId, onSelectHabitation]);
 
-      // Fly to target when triggered from the right panel
+      // Fly to target from right panel
       useEffect(() => {
         const map = mapInstanceRef.current;
         if (!map || !flyToTarget) return;
@@ -401,12 +454,77 @@
           easeLinearity: 0.25,
         });
 
-        // Open the popup for this marker
         const marker = markersRef.current[flyToTarget.id];
         if (marker) {
           setTimeout(() => marker.openPopup(), 800);
         }
       }, [flyToTarget]);
+
+      // Execute overlay: green safe-zone marker + dashed polyline
+      useEffect(() => {
+        const map = mapInstanceRef.current;
+        if (!map) return;
+
+        // Clean up previous overlay layers
+        if (safeZoneRef.current)  { map.removeLayer(safeZoneRef.current);  safeZoneRef.current  = null; }
+        if (polylineRef.current)  { map.removeLayer(polylineRef.current);  polylineRef.current  = null; }
+
+        if (!executeOverlay) return;
+
+        const { fromLat, fromLng } = executeOverlay;
+        const { lat: toLat, lng: toLng, name: zoneName } = SAFE_ZONE;
+
+        // Green glowing marker for Safe Zone
+        const safeIcon = L.divIcon({
+          className: '',
+          html: `
+            <div style="position:relative;width:22px;height:22px;">
+              <div class="marker-safe-zone" style="width:22px;height:22px;"></div>
+              <div class="marker-ring green" style="width:22px;height:22px;margin-top:-11px;margin-left:-11px;"></div>
+            </div>
+          `,
+          iconSize: [22, 22],
+          iconAnchor: [11, 11],
+        });
+
+        const safePopup = `
+          <div style="font-family:'Fira Code',monospace;padding:4px;">
+            <div style="color:#22c55e;font-size:9px;letter-spacing:0.15em;margin-bottom:4px;">✦ SAFE ZONE</div>
+            <div style="color:#86efac;font-size:11px;font-weight:600;margin-bottom:4px;">${zoneName}</div>
+            <div style="font-size:9px;color:#15803d;">CAP: 1,200 / 1,850 | DIR: ↗ NE</div>
+          </div>
+        `;
+
+        safeZoneRef.current = L.marker([toLat, toLng], { icon: safeIcon })
+          .bindPopup(safePopup, { closeButton: true, minWidth: 200 })
+          .addTo(map);
+
+        // Dashed glowing cyan polyline from selected hab to safe zone
+        polylineRef.current = L.polyline(
+          [[fromLat, fromLng], [toLat, toLng]],
+          {
+            color: '#22d3ee',
+            weight: 2.5,
+            opacity: 0.9,
+            dashArray: '10, 8',
+          }
+        ).addTo(map);
+
+        // Apply glow filter to polyline SVG element
+        const polyEl = polylineRef.current.getElement();
+        if (polyEl) {
+          polyEl.style.filter = 'drop-shadow(0 0 5px rgba(34,211,238,0.8)) drop-shadow(0 0 12px rgba(34,211,238,0.4))';
+        }
+
+        // Fly to fit both points
+        const bounds = L.latLngBounds([[fromLat, fromLng], [toLat, toLng]]);
+        map.flyToBounds(bounds, { padding: [60, 60], duration: 1.4, easeLinearity: 0.25 });
+
+        // Open safe-zone popup after fly
+        setTimeout(() => {
+          if (safeZoneRef.current) safeZoneRef.current.openPopup();
+        }, 1600);
+      }, [executeOverlay]);
 
       return (
         <div className="h-full border border-cyan-800/50 hud-panel hud-corners flex flex-col bg-black relative overflow-hidden">
@@ -437,6 +555,15 @@
               </div>
             </div>
 
+            {/* Execute overlay — route active banner */}
+            {executeOverlay && (
+              <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[400] pointer-events-none">
+                <div className="bg-black/80 border border-green-500/50 px-3 py-1" style={{ boxShadow: '0 0 12px rgba(34,197,94,0.3)' }}>
+                  <span className="text-green-400 text-[9px] tracking-[0.2em]">✦ ROUTE_ACTIVE — ZONE_BETA</span>
+                </div>
+              </div>
+            )}
+
             {/* HUD overlay — bottom bar */}
             <div className="absolute bottom-0 left-0 right-0 z-[400] pointer-events-none">
               <div className="flex items-center justify-between px-3 py-1 bg-black/70 border-t border-cyan-900/40 text-[8px] text-cyan-800 tracking-wider">
@@ -450,6 +577,12 @@
                     <span className="inline-block w-2 h-2 rounded-full bg-cyan-400" style={{boxShadow:'0 0 4px #22d3ee'}}></span>
                     HIGH
                   </span>
+                  {executeOverlay && (
+                    <span className="flex items-center gap-1">
+                      <span className="inline-block w-2 h-2 rounded-full bg-green-500" style={{boxShadow:'0 0 4px #22c55e'}}></span>
+                      SAFE ZONE
+                    </span>
+                  )}
                 </div>
                 <span>MARKERS: {habitations.length} ACTIVE</span>
               </div>
@@ -552,15 +685,150 @@
     }
 
     /* ═══════════════════════════════════════
+       TERMINAL LOG LINES (execute animation)
+       ═══════════════════════════════════════ */
+    function TerminalLogs({ visibleCount }) {
+      return (
+        <div className="border border-cyan-800/40 bg-black/60 px-3 py-3 space-y-2" style={{ boxShadow: 'inset 0 0 20px rgba(0,255,255,0.04)' }}>
+          <div className="text-cyan-700 text-[9px] tracking-[0.2em] mb-2 border-b border-cyan-900/30 pb-1">
+            PROCESSING_OUTPUT
+          </div>
+          {TERMINAL_LOGS.slice(0, visibleCount).map((log, i) => (
+            <div key={i} className="log-line flex items-center gap-2">
+              <span className="text-green-400 text-[9px]">✓</span>
+              <span className="text-cyan-300 text-[10px] tracking-wider">{log.text}</span>
+            </div>
+          ))}
+          {visibleCount < TERMINAL_LOGS.length && (
+            <div className="flex items-center gap-1 text-cyan-600 text-[9px] tracking-wider">
+              <span>COMPUTING</span>
+              <span className="dot-1 text-cyan-400">●</span>
+              <span className="dot-2 text-cyan-400">●</span>
+              <span className="dot-3 text-cyan-400">●</span>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════
+       RECOMMENDATION CARD (post-execute)
+       ═══════════════════════════════════════ */
+    function RecommendationCard() {
+      return (
+        <div
+          className="slide-in-up green-glow-pulse relative overflow-hidden"
+          style={{
+            border: '1px solid rgba(34,197,94,0.5)',
+            background: 'linear-gradient(135deg, rgba(0,30,10,0.95) 0%, rgba(0,15,5,0.98) 100%)',
+          }}
+        >
+          {/* Green HUD corner accents */}
+          <span style={{ position:'absolute', top:'-1px', left:'-1px', width:'14px', height:'14px', borderTop:'2px solid #22c55e', borderLeft:'2px solid #22c55e', pointerEvents:'none' }}></span>
+          <span style={{ position:'absolute', top:'-1px', right:'-1px', width:'14px', height:'14px', borderTop:'2px solid #22c55e', borderRight:'2px solid #22c55e', pointerEvents:'none' }}></span>
+          <span style={{ position:'absolute', bottom:'-1px', left:'-1px', width:'14px', height:'14px', borderBottom:'2px solid #22c55e', borderLeft:'2px solid #22c55e', pointerEvents:'none' }}></span>
+          <span style={{ position:'absolute', bottom:'-1px', right:'-1px', width:'14px', height:'14px', borderBottom:'2px solid #22c55e', borderRight:'2px solid #22c55e', pointerEvents:'none' }}></span>
+
+          {/* Card header */}
+          <div className="flex items-center justify-between px-3 py-1.5 border-b" style={{ borderColor: 'rgba(34,197,94,0.25)' }}>
+            <div className="flex items-center gap-2">
+              <span className="text-green-400 text-[9px]">✦</span>
+              <span className="text-green-400 text-[9px] tracking-[0.2em] font-semibold">RECOMMENDED SAFE ZONE</span>
+            </div>
+            <span className="text-green-600 text-[9px] tracking-wider">ROUTE_OPTIMIZED</span>
+          </div>
+
+          {/* Card body */}
+          <div className="px-4 py-3 space-y-3">
+            {/* Zone name */}
+            <div>
+              <div className="text-green-700 text-[8px] tracking-[0.25em] mb-0.5">ZONE_DESIGNATION</div>
+              <div className="text-green-300 text-sm font-bold tracking-wider" style={{ textShadow: '0 0 8px rgba(34,197,94,0.5)' }}>
+                {SAFE_ZONE.name}
+              </div>
+            </div>
+
+            <div className="h-px" style={{ background: 'linear-gradient(to right, transparent, rgba(34,197,94,0.3), transparent)' }}></div>
+
+            {/* Stats grid */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <div className="text-green-700 text-[8px] tracking-[0.2em]">RECOMMENDED DIRECTION</div>
+                <div className="text-green-300 text-xs font-semibold tracking-wider">↗ NORTH-EAST (4.2 km)</div>
+              </div>
+              <div className="space-y-1">
+                <div className="text-green-700 text-[8px] tracking-[0.2em]">SHELTER CAPACITY</div>
+                <div className="text-green-300 text-xs font-semibold tracking-wider">1,200 / 1,850</div>
+              </div>
+            </div>
+
+            {/* Capacity bar */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-green-700 text-[8px] tracking-wider">OCCUPANCY LOAD</span>
+                <span className="text-green-400 text-[8px]">64.9%</span>
+              </div>
+              <div className="w-full h-1 bg-green-950 overflow-hidden rounded-sm">
+                <div
+                  className="h-full rounded-sm transition-all duration-1000"
+                  style={{
+                    width: '64.9%',
+                    background: 'linear-gradient(to right, #22c55e, #4ade80)',
+                    boxShadow: '0 0 6px rgba(34,197,94,0.6)',
+                  }}
+                ></div>
+              </div>
+            </div>
+
+            {/* Route status */}
+            <div className="flex items-center gap-2 pt-1 border-t" style={{ borderColor: 'rgba(34,197,94,0.2)' }}>
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-green-400" style={{ boxShadow: '0 0 6px #22c55e' }}></span>
+              <span className="text-green-600 text-[9px] tracking-wider">ROUTE DRAWN ON MAP — POLYLINE_ACTIVE</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════
        COMMAND TERMINAL (Right — 40%)
        ═══════════════════════════════════════ */
-    function CommandTerminal({ habitations, selectedId, selected, onAnalyze, onRemove }) {
-      const [executed, setExecuted] = useState(false);
+    function CommandTerminal({ habitations, selectedId, selected, onAnalyze, onRemove, onExecuteOverlay }) {
+      /*  phase: 'idle' | 'loading' | 'done'  */
+      const [phase, setPhase] = useState('idle');
+      const [logCount, setLogCount] = useState(0);
+      const timerRefs = useRef([]);
 
-      const handleExecute = () => {
-        setExecuted(true);
-        setTimeout(() => setExecuted(false), 2000);
-      };
+      // Reset when selected habitation changes
+      useEffect(() => {
+        timerRefs.current.forEach(t => clearTimeout(t));
+        timerRefs.current = [];
+        setPhase('idle');
+        setLogCount(0);
+      }, [selectedId]);
+
+      const handleExecute = useCallback(() => {
+        if (phase !== 'idle' || !selected) return;
+
+        setPhase('loading');
+        setLogCount(0);
+
+        // Stagger terminal log lines
+        TERMINAL_LOGS.forEach((log, i) => {
+          const t = setTimeout(() => setLogCount(c => c + 1), log.delay + 120);
+          timerRefs.current.push(t);
+        });
+
+        // After 2s: transition to done, trigger map overlay
+        const doneTimer = setTimeout(() => {
+          setPhase('done');
+          onExecuteOverlay({ fromLat: selected.lat, fromLng: selected.lng });
+        }, 2000);
+        timerRefs.current.push(doneTimer);
+      }, [phase, selected, onExecuteOverlay]);
+
+      const isLoading = phase === 'loading';
+      const isDone    = phase === 'done';
 
       return (
         <div className="h-full flex flex-col border border-cyan-800/50 hud-panel hud-corners bg-black overflow-hidden">
@@ -624,24 +892,45 @@
                 INITIATE OVERRIDE?
               </div>
               <button
+                id="btn-execute"
                 onClick={handleExecute}
-                disabled={!selected}
+                disabled={!selected || isLoading || isDone}
                 className={`execute-btn w-full py-3 border-2 text-sm font-bold tracking-[0.3em] uppercase transition-all duration-200
-                  ${selected
-                    ? 'border-cyan-500 text-cyan-400 bg-cyan-950/20 hover:bg-cyan-400 hover:text-black'
-                    : 'border-cyan-900/40 text-cyan-800 bg-transparent cursor-not-allowed'
+                  ${selected && !isLoading && !isDone
+                    ? 'border-cyan-500 text-cyan-400 bg-cyan-950/20'
+                    : isDone
+                      ? 'border-green-500/60 text-green-400 bg-green-950/20'
+                      : 'border-cyan-900/40 text-cyan-800 bg-transparent'
                   }
-                  ${executed ? 'bg-cyan-400 !text-black border-cyan-300' : ''}
                 `}
               >
-                {executed ? '>> PROTOCOL EXECUTED ✓' : '> EXECUTE'}
+                {isLoading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="dot-1 text-cyan-400">●</span>
+                    <span className="dot-2 text-cyan-400">●</span>
+                    <span className="dot-3 text-cyan-400">●</span>
+                    <span className="ml-2 text-cyan-500 tracking-widest">ANALYZING</span>
+                  </span>
+                ) : isDone ? (
+                  '✓ PROTOCOL EXECUTED'
+                ) : (
+                  '> EXECUTE'
+                )}
               </button>
-              {!selected && (
+              {!selected && !isLoading && !isDone && (
                 <div className="text-cyan-800 text-[9px] tracking-wider mt-1 text-center">
                   SELECT A HABITATION TO ENABLE EXECUTION
                 </div>
               )}
             </div>
+
+            {/* Terminal loading log (shown during loading + after done) */}
+            {(isLoading || isDone) && (
+              <TerminalLogs visibleCount={isDone ? TERMINAL_LOGS.length : logCount} />
+            )}
+
+            {/* Recommendation card (shown only after done) */}
+            {isDone && <RecommendationCard />}
 
             {/* Risk Metrics Widget */}
             <div className="border border-cyan-800/40 hud-panel hud-corners relative">
@@ -719,45 +1008,59 @@
           <div className="px-3 py-1.5 border-t border-cyan-900/40 flex items-center justify-between text-[9px] text-cyan-800 tracking-wider">
             <span>SIH_26191</span>
             <span>ENGINE: RISK_ANALYZER_v2.4</span>
-            <span>◆ READY</span>
+            <span className={isLoading ? 'text-amber-600' : isDone ? 'text-green-600' : ''}>
+              {isLoading ? '◆ PROCESSING' : isDone ? '◆ ROUTE_ACTIVE' : '◆ READY'}
+            </span>
           </div>
         </div>
       );
     }
 
     /* ═══════════════════════════════════════
-       MAIN APP — State lifted here for
-       two-way map ↔ terminal interactivity
+       MAIN APP
        ═══════════════════════════════════════ */
     function App() {
       const [selectedId, setSelectedId] = useState(null);
       const [habitations, setHabitations] = useState(HABITATIONS);
       const [flyToTarget, setFlyToTarget] = useState(null);
+      const [executeOverlay, setExecuteOverlay] = useState(null);
 
       const selected = useMemo(
         () => habitations.find(h => h.id === selectedId) || null,
         [selectedId, habitations]
       );
 
-      // Called when ANALYZE is clicked on a row — selects + flies map
+      // ANALYZE clicked — selects + flies map
       const handleAnalyze = useCallback((hab) => {
         const newId = hab.id === selectedId ? null : hab.id;
         setSelectedId(newId);
+        setExecuteOverlay(null);
         if (newId !== null) {
-          // Trigger a new flyTo by creating a fresh object reference
           setFlyToTarget({ id: hab.id, lat: hab.lat, lng: hab.lng, _ts: Date.now() });
         }
       }, [selectedId]);
 
-      // Called when a marker is clicked on the map — selects only
+      // Marker clicked on map — selects only
       const handleMarkerSelect = useCallback((id) => {
-        setSelectedId(prev => prev === id ? null : id);
+        setSelectedId(prev => {
+          const next = prev === id ? null : id;
+          setExecuteOverlay(null);
+          return next;
+        });
       }, []);
 
       const handleRemove = useCallback((id) => {
         setHabitations(prev => prev.filter(h => h.id !== id));
-        if (selectedId === id) setSelectedId(null);
+        if (selectedId === id) {
+          setSelectedId(null);
+          setExecuteOverlay(null);
+        }
       }, [selectedId]);
+
+      // Called by CommandTerminal when execute completes
+      const handleExecuteOverlay = useCallback((overlay) => {
+        setExecuteOverlay(overlay);
+      }, []);
 
       return (
         <div className="h-screen w-screen bg-black font-mono flex flex-col text-cyan-400 overflow-hidden select-none">
@@ -771,6 +1074,7 @@
                 selectedId={selectedId}
                 onSelectHabitation={handleMarkerSelect}
                 flyToTarget={flyToTarget}
+                executeOverlay={executeOverlay}
               />
             </section>
 
@@ -782,13 +1086,14 @@
                 selected={selected}
                 onAnalyze={handleAnalyze}
                 onRemove={handleRemove}
+                onExecuteOverlay={handleExecuteOverlay}
               />
             </section>
           </main>
 
           <footer className="flex items-center justify-between px-4 py-1 border-t border-cyan-900/40 text-[8px] text-cyan-900 tracking-[0.2em]">
-            <span>DRIP — DISASTER RELOCATION INTELLIGENCE PLATFORM © 2026</span>
-            <span>BUILD 0.9.1-ALPHA</span>
+            <span>DRIP — DISASTER RELOCATION INTELLIGENCE PLATFORM &copy; 2026</span>
+            <span>BUILD 0.9.2-ALPHA</span>
             <span>NODE: PRIMARY | UPLINK: STABLE</span>
           </footer>
         </div>

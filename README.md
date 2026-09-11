@@ -15,10 +15,10 @@ An intelligent disaster-relocation decision-support prototype built with a high-
 - **Two-Way Interactivity**:
   - **Map Marker → Terminal**: Clicking any glowing marker on the map syncs selection with the right panel command terminal and updates risk telemetry.
   - **Terminal → Map**: Clicking `[ ANALYZE ]` on any habitation row in the terminal highlights the row and smoothly flies the map to the target coordinates.
-- **Interactive Command Terminal**:
-  - **Habitations Registry**: Interactive list of high-risk habitations with risk tiers (CRITICAL / HIGH), population counts, and threat vectors.
-  - **Risk Metrics & Donut Chart**: Dynamic SVG donut chart and sub-metric breakdown (Hazard Intensity, Population Vulnerability, Infrastructure Deficit).
-  - **Override Action**: Interactive `> EXECUTE` button with glow hover animations.
+- **Relocation Intelligence Execution Sequence (`> EXECUTE`)**:
+  - **Terminal Loading Simulation**: Staggered terminal execution logs (`>> ANALYZING HAZARD EXPOSURE...`, `>> EVALUATING CARRYING CAPACITY...`, `>> OPTIMIZING SAFE RELOCATION ROUTE...`).
+  - **Recommended Safe Zone Card**: Animated slide-in HUD card displaying designated safe location ("Zone Beta — High Plateau"), recommended heading (`↗ NORTH-EAST (4.2 km)`), shelter capacity (`1,200 / 1,850`), and real-time occupancy load indicator.
+  - **Interactive Map Overlays**: Drops a glowing green marker for Safe Zone Beta, draws a glowing cyan dashed polyline connecting the target habitation directly to the safe zone, and auto-fits map bounds.
 
 ## Getting Started
 
